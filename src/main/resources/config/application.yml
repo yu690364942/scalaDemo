@@ -1,0 +1,22 @@
+components:
+  webSocket: false
+  kafka: false
+  hdfs: false
+  camunda: false
+spring:
+  profiles:
+    include: common,datasource,camunda
+    active: dev
+  #  mvc:
+  #    async:
+  #      request-timeout: 300000
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+mybatisplus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
+
+

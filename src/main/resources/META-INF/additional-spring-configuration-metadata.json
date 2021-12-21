@@ -1,0 +1,28 @@
+{
+  "properties": [
+    {
+      "name": "components.webSocket",
+      "type": "java.lang.Boolean",
+      "description": "Description for components.webSocket.",
+      "defaultValue": false
+    },
+    {
+      "name": "components.kafka",
+      "type": "java.lang.Boolean",
+      "description": "Description for components.kafka.",
+      "defaultValue": false
+    },
+    {
+      "name": "components.hdfs",
+      "type": "java.lang.Boolean",
+      "description": "Description for components.hdfs.",
+      "defaultValue": false
+    },
+    {
+      "name": "components.camunda",
+      "type": "java.lang.Boolean",
+      "description": "Description for components.camunda.",
+      "defaultValue": false
+    }
+  ]
+}

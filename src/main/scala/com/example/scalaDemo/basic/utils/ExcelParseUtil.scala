@@ -1,0 +1,247 @@
+package com.example.scalaDemo.basic.utils
+
+import com.example.scalaDemo.basic.utils.ExcelParseUtil.logger
+import org.apache.poi.ooxml.util.SAXHelper
+import org.apache.poi.openxml4j.opc.OPCPackage
+import org.apache.poi.xssf.eventusermodel.{ReadOnlySharedStringsTable, XSSFReader, XSSFSheetXMLHandler}
+import org.apache.poi.xssf.model.StylesTable
+import org.apache.poi.xssf.usermodel.XSSFComment
+import org.slf4j.{Logger, LoggerFactory}
+import org.xml.sax.{InputSource, SAXException}
+
+import java.io.{IOException, InputStream}
+import java.lang.reflect.Method
+import java.util
+import java.util.Date
+import javax.xml.parsers.ParserConfigurationException
+
+
+class ExcelParseUtil[T](val aClass: Class[T]) {
+  /**
+   * 表格
+   */
+  private var table: util.ArrayList[T] = _
+  /**
+   * 页面大小
+   */
+  private var pageSize = 0
+  /**
+   * 的数据行
+   */
+  private var dataFromRow = 0
+  /**
+   * 消费者
+   */
+  private var consumer: util.ArrayList[T] => Unit = _
+  /**
+   * 输入流
+   */
+  private var inputStream: InputStream = _
+  /**
+   * 处理程序映射
+   */
+  private val handlerMap = new scala.collection.mutable.HashMap[String, Handler]
+
+
+  /**
+   * 的数据行
+   *
+   * @param dataFromRow 的数据行
+   * @return ExcelParseUtil<T>
+   */
+  def dataFromRow(dataFromRow: Int): ExcelParseUtil[T] = {
+    this.dataFromRow = dataFromRow
+    this
+  }
+
+
+  /**
+   * 页面大小
+   *
+   * @param pageSize 页面大小
+   * @return ExcelParseUtil<T>
+   */
+  def pageSize(pageSize: Int): ExcelParseUtil[T] = {
+    this.pageSize = pageSize
+    this.table = new util.ArrayList[T](pageSize)
+    this
+  }
+
+  /**
+   * 列
+   *
+   * @param columnName 列名
+   * @param method     方法
+   * @param function   函数
+   * @return ExcelParseUtil<T>
+   */
+  def column(columnName: String, method: Method, function: String => AnyRef): ExcelParseUtil[T] = {
+    this.handlerMap.put(columnName, new Handler(method, function))
+    this
+  }
+
+  /**
+   * 列
+   *
+   * @param columnName 列名
+   * @param method     方法
+   * @return ExcelParseUtil<T>
+   */
+  def column(columnName: String, method: Method): ExcelParseUtil[T] = {
+    handlerMap.put(columnName, new Handler(method))
+    this
+  }
+
+  /**
+   * 解析
+   *
+   * @param inputStream 输入流
+   * @return ExcelParseUtil<T>
+   */
+  def parse(inputStream: InputStream): ExcelParseUtil[T] = {
+    this.inputStream = inputStream
+    this
+  }
+
+  /**
+   * 然后
+   *
+   * @param consumer 消费者
+   */
+  def `then`(consumer: util.ArrayList[T] => Unit): Unit = {
+    this.consumer = consumer
+    try {
+      val opcPackage = OPCPackage.open(inputStream)
+      try {
+        val xssfReader = new XSSFReader(opcPackage)
+        val styles = xssfReader.getStylesTable
+        val strings = new ReadOnlySharedStringsTable(opcPackage)
+        inputStream = xssfReader.getSheetsData.next
+        processSheet(styles, strings, inputStream)
+      } catch {
+        case e: Exception =>
+          e.printStackTrace()
+      } finally if (opcPackage != null) opcPackage.close()
+    }
+  }
+
+
+  /**
+   * 工艺过程卡
+   *
+   * @param styles           风格
+   * @param strings          字符串
+   * @param sheetInputStream 表输入流
+   * @throws ParserConfigurationException 解析器配置异常
+   * @throws SAXException                 saxexception
+   */
+  @throws[ParserConfigurationException]
+  @throws[SAXException]
+  private def processSheet(styles: StylesTable, strings: ReadOnlySharedStringsTable, sheetInputStream: InputStream): Unit = {
+    val sheetParser = SAXHelper.newXMLReader
+    sheetParser.setContentHandler(new XSSFSheetXMLHandler(styles, strings, new XmlSheetContentsHandler, false))
+    try {
+      sheetParser.parse(new InputSource(sheetInputStream))
+      if (!table.isEmpty) consumer(table)
+    } catch {
+      case e@(_: RuntimeException | _: IOException) =>
+        logger.error(e.getMessage, e)
+    }
+  }
+
+  def init(setCreateTime: Method, date: Date): ExcelParseUtil[AnyRef] = null
+
+
+  /**
+   * <p>TiTle: XmlSheetContentsHandler</p>
+   * <p>Description: Test XmlSheetContentsHandler</p>
+   * <p>Company: www.nbcb.cn</p>
+   *
+   * @author yhq
+   * @version 1.0.0
+   * @since 2021/12/07 14:44
+   */
+  private class XmlSheetContentsHandler extends XSSFSheetXMLHandler.SheetContentsHandler {
+    /**
+     * 行
+     */
+    protected var row: T = _
+
+    /**
+     * 开始行
+     *
+     * @param rowNum 行num
+     */
+    override def startRow(rowNum: Int): Unit = {
+      if (rowNum < dataFromRow) return
+      try row = aClass.newInstance
+      catch {
+        case e: Exception =>
+          throw new RuntimeException(e)
+      }
+    }
+
+    /**
+     * 结束行
+     *
+     * @param rowNum 行num
+     */
+    override def endRow(rowNum: Int): Unit = { // 判断是否使用异常作为文件读取结束（有些Excel文件格式特殊，导致很多空行，浪费内存）
+      // 添加数据到list集合
+      if (row == null) return
+      table.add(row)
+      if (table.size == pageSize) {
+        consumer(table)
+        table = new util.ArrayList[T]
+      }
+    }
+
+    /**
+     * 细胞
+     * 所有单元格数据转换为string类型，需要自己做数据类型处理
+     *
+     * @param cellReference  单元格索引
+     * @param formattedValue 单元格内容（全部被POI格式化为字符串）
+     * @param comment        评论
+     */
+    override def cell(cellReference: String, formattedValue: String, comment: XSSFComment): Unit = {
+      if (row == null) return
+      try {
+        val s = cellReference.replaceAll("[0-9]*", "")
+        val handler = handlerMap(s)
+        if (handler == null) return
+        handler.method.invoke(row, handlerMap(s).function(formattedValue))
+      } catch {
+        case e: Exception =>
+          throw new RuntimeException(e)
+      }
+    }
+  }
+
+  /**
+   * <p>TiTle: Handler</p>
+   * <p>Description: Test Handler</p>
+   * <p>Company: www.nbcb.cn</p>
+   *
+   * @author yhq
+   * @version 1.0.0
+   * @since 2021/12/07 14:44
+   */
+  private class Handler(var method: Method, var function: String => AnyRef) {
+    /**
+     * 处理程序
+     *
+     * @param method 方法
+     */
+    def this(method: Method) {
+      this(method, item => item)
+    }
+  }
+}
+
+
+object ExcelParseUtil {
+  val logger: Logger = LoggerFactory.getLogger(this.getClass)
+
+  def apply[T](aClass: Class[T]): ExcelParseUtil[T] = new ExcelParseUtil(aClass)
+}

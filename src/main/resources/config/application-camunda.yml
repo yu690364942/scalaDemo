@@ -1,0 +1,20 @@
+camunda:
+  bpm:
+    admin-user:
+      id: admin
+      password: admin
+      first-name: admin
+    filter:
+      create: all
+    deployment-resource-pattern: classpath:processes/*.bpmn
+    database:
+      schema-update: true
+      jdbc-batch-processing: false
+      schema-name: yuhaoqiang
+      type: mysql
+      table-prefix: yuhaoqiang.
+    auto-deployment-enabled: true
+    job-execution:
+      enabled: ${components.camunda}
+    webapp:
+      index-redirect-enabled: true
