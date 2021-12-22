@@ -16,11 +16,11 @@ import java.util.Date
 import javax.xml.parsers.ParserConfigurationException
 
 
-class ExcelParseUtil[T](val aClass: Class[T]) {
+class ExcelParseUtil() {
   /**
    * 表格
    */
-  private var table: util.ArrayList[T] = _
+  private var table: Array[Array[AnyRef]] = _
   /**
    * 页面大小
    */
@@ -32,7 +32,7 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
   /**
    * 消费者
    */
-  private var consumer: util.ArrayList[T] => Unit = _
+  private var consumer: List[Array[AnyRef]] => Unit = _
   /**
    * 输入流
    */
@@ -40,7 +40,7 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
   /**
    * 处理程序映射
    */
-  private val handlerMap = new scala.collection.mutable.HashMap[String, Handler]
+  private var handlerMap: Map[String, (Int, String => AnyRef)] = _
 
 
   /**
@@ -49,7 +49,7 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
    * @param dataFromRow 的数据行
    * @return ExcelParseUtil<T>
    */
-  def dataFromRow(dataFromRow: Int): ExcelParseUtil[T] = {
+  def dataFromRow(dataFromRow: Int): ExcelParseUtil = {
     this.dataFromRow = dataFromRow
     this
   }
@@ -61,36 +61,18 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
    * @param pageSize 页面大小
    * @return ExcelParseUtil<T>
    */
-  def pageSize(pageSize: Int): ExcelParseUtil[T] = {
+  def pageSize(pageSize: Int): ExcelParseUtil = {
     this.pageSize = pageSize
-    this.table = new util.ArrayList[T](pageSize)
+    this.table = new Array[Array[AnyRef]](pageSize)
     this
   }
 
-  /**
-   * 列
-   *
-   * @param columnName 列名
-   * @param method     方法
-   * @param function   函数
-   * @return ExcelParseUtil<T>
-   */
-  def column(columnName: String, method: Method, function: String => AnyRef): ExcelParseUtil[T] = {
-    this.handlerMap.put(columnName, new Handler(method, function))
+
+  def handlerMap(handlerMap: Map[String, (Int, String => AnyRef)]): ExcelParseUtil = {
+    this.handlerMap = handlerMap
     this
   }
 
-  /**
-   * 列
-   *
-   * @param columnName 列名
-   * @param method     方法
-   * @return ExcelParseUtil<T>
-   */
-  def column(columnName: String, method: Method): ExcelParseUtil[T] = {
-    handlerMap.put(columnName, new Handler(method))
-    this
-  }
 
   /**
    * 解析
@@ -98,7 +80,7 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
    * @param inputStream 输入流
    * @return ExcelParseUtil<T>
    */
-  def parse(inputStream: InputStream): ExcelParseUtil[T] = {
+  def parse(inputStream: InputStream): ExcelParseUtil = {
     this.inputStream = inputStream
     this
   }
@@ -108,7 +90,7 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
    *
    * @param consumer 消费者
    */
-  def `then`(consumer: util.ArrayList[T] => Unit): Unit = {
+  def result(consumer: List[Array[AnyRef]] => Unit): Unit = {
     this.consumer = consumer
     try {
       val opcPackage = OPCPackage.open(inputStream)
@@ -142,14 +124,13 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
     sheetParser.setContentHandler(new XSSFSheetXMLHandler(styles, strings, new XmlSheetContentsHandler, false))
     try {
       sheetParser.parse(new InputSource(sheetInputStream))
-      if (!table.isEmpty) consumer(table)
+      val list = table.filter(item => item != null).toList
+      if (list.nonEmpty) consumer(list)
     } catch {
       case e@(_: RuntimeException | _: IOException) =>
         logger.error(e.getMessage, e)
     }
   }
-
-  def init(setCreateTime: Method, date: Date): ExcelParseUtil[AnyRef] = null
 
 
   /**
@@ -165,7 +146,7 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
     /**
      * 行
      */
-    protected var row: T = _
+    protected var row: Array[AnyRef] = _
 
     /**
      * 开始行
@@ -174,9 +155,10 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
      */
     override def startRow(rowNum: Int): Unit = {
       if (rowNum < dataFromRow) return
-      try row = aClass.newInstance
+      try row = new Array(handlerMap.size)
       catch {
         case e: Exception =>
+          e.printStackTrace()
           throw new RuntimeException(e)
       }
     }
@@ -189,10 +171,11 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
     override def endRow(rowNum: Int): Unit = { // 判断是否使用异常作为文件读取结束（有些Excel文件格式特殊，导致很多空行，浪费内存）
       // 添加数据到list集合
       if (row == null) return
-      table.add(row)
-      if (table.size == pageSize) {
-        consumer(table)
-        table = new util.ArrayList[T]
+      val rowIndex = (rowNum - dataFromRow) % pageSize
+      table(rowIndex) = row
+      if (rowIndex + 1 == pageSize) {
+        consumer(table.toList)
+        table = new Array[Array[AnyRef]](pageSize)
       }
     }
 
@@ -208,33 +191,14 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
       if (row == null) return
       try {
         val s = cellReference.replaceAll("[0-9]*", "")
-        val handler = handlerMap(s)
-        if (handler == null) return
-        handler.method.invoke(row, handlerMap(s).function(formattedValue))
+        if (handlerMap.contains(s)) {
+          row(handlerMap(s)._1) = handlerMap(s)._2(formattedValue)
+        }
       } catch {
         case e: Exception =>
+          logger.error(e.getMessage, e: Any)
           throw new RuntimeException(e)
       }
-    }
-  }
-
-  /**
-   * <p>TiTle: Handler</p>
-   * <p>Description: Test Handler</p>
-   * <p>Company: www.nbcb.cn</p>
-   *
-   * @author yhq
-   * @version 1.0.0
-   * @since 2021/12/07 14:44
-   */
-  private class Handler(var method: Method, var function: String => AnyRef) {
-    /**
-     * 处理程序
-     *
-     * @param method 方法
-     */
-    def this(method: Method) {
-      this(method, item => item)
     }
   }
 }
@@ -243,5 +207,5 @@ class ExcelParseUtil[T](val aClass: Class[T]) {
 object ExcelParseUtil {
   val logger: Logger = LoggerFactory.getLogger(this.getClass)
 
-  def apply[T](aClass: Class[T]): ExcelParseUtil[T] = new ExcelParseUtil(aClass)
+  def apply(): ExcelParseUtil = new ExcelParseUtil()
 }

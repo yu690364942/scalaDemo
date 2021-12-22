@@ -25,10 +25,12 @@ class FileServiceImpl(@Autowired jdbcTemplate: JdbcTemplate) extends FileService
 
   @Async
   override def upload(multipartFile: MultipartFile): Unit = {
-    ExcelParseUtil(classOf[WhiteList])
-      .parse(multipartFile.getInputStream)
-      .dataFromRow(1)
-      .pageSize(10000)
+    ExcelParseUtil() parse multipartFile.getInputStream dataFromRow 1 pageSize 10001 handlerMap Map("B" -> (0, item => item), "C" -> (1, item => item)) result insertData
+  }
 
+  private def insertData(arr: List[Array[AnyRef]]): Unit = {
+    val sql = "insert into white_list (name,phone_num) values (?,?)"
+    import scala.collection.JavaConverters._
+    jdbcTemplate batchUpdate(sql, arr.asJava)
   }
 }
